@@ -2,6 +2,8 @@ module Credentials : sig
   type t
 
   val create : client_id:string -> client_secret:string -> t
+
+  val client_id : t -> string
 end
 
 module Access_token : sig

@@ -15,6 +15,16 @@ let cleanup2 str =
 let queries { Npr.Song.album; title; artist; start_time = _ } =
   let open List.Let_syntax in
   let all x = [ x; cleanup1 x; cleanup2 x ] in
+  let title_artist_albums =
+    match album with
+    | None -> []
+    | Some album ->
+      let%bind title = all title in
+      let%bind album = all album in
+      let%bind artist = all artist in
+      Spotify.Query.create ~album:(Some album) ~track:(Some title) ~artist:(Some artist)
+      |> return
+  in
   let title_artists =
     let%bind title = all title in
     let%bind artist = all artist in
@@ -30,7 +40,9 @@ let queries { Npr.Song.album; title; artist; start_time = _ } =
       Spotify.Query.create ~album:(Some album) ~track:(Some title) ~artist:None
       |> return
   in
-  List.dedup_and_sort ~compare:Spotify.Query.compare (title_artists @ title_albums)
+  List.dedup_and_sort
+    ~compare:Spotify.Query.compare
+    (title_artist_albums @ title_artists @ title_albums)
 
 let tracks
     (songs : Npr.Song.t Or_error.t Pipe.Reader.t)

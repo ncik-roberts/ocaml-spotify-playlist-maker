@@ -1,5 +1,5 @@
 all:
-	dune build cohttp_async_utils.a
+	dune build cohttp_request_async.a
 
 
 .PHONY: all

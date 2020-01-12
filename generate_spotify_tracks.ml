@@ -33,9 +33,9 @@ let queries { Npr.Song.album; title; artist; start_time = _ } =
   List.dedup_and_sort ~compare:Spotify.Query.compare (title_artists @ title_albums)
 
 let tracks
-  (type a)
-  (songs : Npr.Song.t Or_error.t Pipe.Reader.t)
-  ~(access_token : a Spotify.Access_token.t) =
+    (songs : Npr.Song.t Or_error.t Pipe.Reader.t)
+    ~(client : Spotify_async_client.t)
+  =
   let num_failures = ref 0 in
   Pipe.create_reader ~close_on_exception:true (fun writer ->
     Pipe.iter songs ~f:(fun song_or_error ->
@@ -47,10 +47,9 @@ let tracks
         let rec loop = function
           | [] -> Ok (`Skipping song) |> Pipe.write writer
           | query :: queries ->
-            let request = Spotify.search_tracks ~limit:1 ~access_token ~query () in
-            (match%bind Cohttp_request_async.request request with
-             | Ok { items = track :: _; _ } -> Pipe.write writer (Ok (`Found (song, track)))
-             | Ok { items = []; _ } -> loop queries
+            (match%bind Spotify_async_client.search_track client ~query with
+             | Ok (Some track) -> Pipe.write writer (Ok (`Found (song, track)))
+             | Ok None -> loop queries
              | Error e ->
                if !num_failures > 3
                then

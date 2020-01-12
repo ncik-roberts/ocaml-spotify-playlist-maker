@@ -1,4 +1,11 @@
 open Core
 open Async
 
-val request : 'a Cohttp_request.t -> 'a Or_error.t Deferred.t
+module Request_error : sig
+  type t =
+    { response_code : int
+    ; error : Error.t
+    }
+end
+
+val request : 'a Cohttp_request.t -> ('a, Request_error.t) Result.t Deferred.t

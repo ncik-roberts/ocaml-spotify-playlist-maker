@@ -126,7 +126,7 @@ let lookup_until_done t writer ~from ~done_ ~in_range =
       let%bind () = Backoff.wait backoff in
       let%bind songs = Cohttp_request_async.request (query t time) in
       match songs with
-      | Error e -> Pipe.write_if_open writer (Error e)
+      | Error { response_code = _; error } -> Pipe.write_if_open writer (Error error)
       | Ok [] -> loop (add_some_time time) time song_ids (Backoff.increase backoff)
       | Ok songs ->
           let new_songs =

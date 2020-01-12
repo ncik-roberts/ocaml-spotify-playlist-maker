@@ -1,10 +1,42 @@
 open Core
 open Async
 
-let credentials_file = "credentials.txt"
+let make_time date hour ~zone =
+  let time = Time_ns.Ofday.create ~hr:hour () in
+  Time_ns.of_date_ofday ~zone date time
 
 let within_the_last time ~span =
   Time_ns.Span.(<) (Time_ns.diff (Time_ns.now ()) time) span
+
+let create_client config =
+  let client_uri, result = Spotify_async_client.create config in
+  match%bind Process.run ~prog:"xdg-open" ~args:[ Uri.to_string client_uri ] () with
+  | Error _ as error -> return error
+  | Ok (_output : string) ->result
+
+let playlist_name ~begin_ ~end_ ~begin_time ~end_time =
+  let suffix =
+    if Date.equal begin_ end_
+    then sprintf "%s, from %d:00 til %d:59"
+      (Date.to_string_american begin_)
+      begin_time
+      (end_time-1)
+    else sprintf "from %s at %d:00, til %s at %d:59"
+      (Date.to_string_american begin_)
+      begin_time
+      (Date.to_string_american end_)
+      end_time
+  in
+  sprintf "WYEP Playlist %s" suffix
+
+let credentials ~credentials_file =
+  let `Client_id client_id, `Client_secret client_secret =
+    match In_channel.read_lines credentials_file with
+    | [ client_id; client_secret ] ->
+      `Client_id client_id, `Client_secret client_secret
+    | _ -> failwith ("Invalid file " ^ credentials_file)
+  in
+  Spotify.Credentials.create ~client_id ~client_secret
 
 let command =
   Command.async
@@ -48,7 +80,7 @@ let command =
          ~doc:"8888 port to use for fetching authorization code"
      and credentials_file =
        flag ~aliases:["c"] "--credentials-file"
-          (optional_with_default credentials_file string)
+          (optional_with_default "credentials.txt" string)
           ~doc:"credentials.txt the credentials file"
      in
      fun () ->
@@ -56,22 +88,12 @@ let command =
        let zone = force Time_ns.Zone.local in
        let today = Date.today ~zone in
        let begin_ = Option.value begin_ ~default:today in
-       let make_time date hour =
-         let time = Time_ns.Ofday.create ~hr:hour () in
-         Time_ns.of_date_ofday ~zone date time
-       in
        let end_ = Option.value end_ ~default:today in
        let end_time = Option.value end_time ~default:24 in
-       let `Client_id client_id, `Client_secret client_secret =
-         match In_channel.read_lines credentials_file with
-         | [ client_id; client_secret ] ->
-           `Client_id client_id, `Client_secret client_secret
-         | _ -> failwith ("Invalid file " ^ credentials_file)
-       in
        let npr = Npr.create ~station_id in
-       let from = make_time begin_ begin_time in
-       let until = make_time end_ end_time in
-       let credentials = Spotify.Credentials.create ~client_id ~client_secret in
+       let from = make_time ~zone begin_ begin_time in
+       let until = make_time ~zone end_ end_time in
+       let credentials = credentials ~credentials_file in
        let scopes =
          match playlist_id with
          | Some _ ->
@@ -81,156 +103,70 @@ let command =
            ]
          | None -> [ `Playlist_modify_private ]
        in
-       let%bind authorization_code =
-          Spotify_authorization_code_fetcher.fetch_authorization_code
-            ~client_id
-            ~port
-            ~scopes
-          >>| ok_exn
-        in
-        let%bind client_credentials_flow =
-          Spotify.Client_credentials_flow.get_access_token ~credentials
-          |> Cohttp_request_async.request
-          >>| ok_exn
-        in
-        let%bind authorization_code_flow =
-          Spotify.Authorization_code_flow.get_access_token
-            authorization_code
-            ~credentials
-          |> Cohttp_request_async.request
-          >>| ok_exn
-        in
-        let { Spotify.Authorization_code_flow.access_token; refresh_token; expires_in } =
-          authorization_code_flow
-        in
-        let when_to_refresh =
-          Time_ns.add (Time_ns.now ()) (Time_ns.Span.of_int_sec expires_in)
-        in
-        let%bind playlist, uris_in_playlist =
+       let%bind client =
+         create_client { port; scopes; user_id; credentials } >>| ok_exn
+       in
+        let%bind playlist, uris_already_added_to_playlist =
           match playlist_id with
           | Some playlist ->
             let playlist = Spotify.Playlist.of_id playlist in
             let%bind items_in_playlist =
-              Spotify.lookup_playlist
-                ~access_token
-                ~playlist
-                ()
-              |> Cohttp_request_async.request
+              Spotify_async_client.all_tracks_in_playlist client ~playlist
               >>| ok_exn
             in
-            let uris_in_playlist = List.map items_in_playlist.items ~f:(fun x -> x.uri) in
+            let uris_in_playlist = List.map items_in_playlist ~f:(fun x -> x.uri) in
             return (playlist, String.Set.of_list uris_in_playlist)
           | None ->
-            let playlist_name =
-              let suffix =
-                if Date.equal begin_ end_
-                then sprintf "%s, from %d:00 til %d:59"
-                  (Date.to_string_american begin_)
-                  begin_time
-                  (end_time-1)
-                else sprintf "from %s at %d:00, til %s at %d:59"
-                  (Date.to_string_american begin_)
-                  begin_time
-                  (Date.to_string_american end_)
-                  end_time
-              in
-              sprintf "WYEP Playlist %s" suffix
-            in
+            let playlist_name = playlist_name ~begin_ ~end_ ~begin_time ~end_time in
             let%bind playlist =
-              Spotify.make_playlist
+              Spotify_async_client.make_playlist
+                client
                 ~kind:`Private
-                ~access_token
-                ~user_id
                 ~name:playlist_name
-              |> Cohttp_request_async.request
               >>| ok_exn
             in
             return (playlist, String.Set.empty)
         in
         let songs = Npr.lookup_songs npr ~from ~until in
-        let tracks =
-          Generate_spotify_tracks.tracks
-            songs
-            ~access_token:client_credentials_flow.access_token
-        in
-        let
-          module State = struct
-            type t =
-              { to_write : Spotify.Track.t list
-              ; access_token : Spotify.Authorization_code_flow.Access_token.t
-              ; refresh_token : Spotify.Authorization_code_flow.Refresh_token.t
-              ; when_to_refresh : Time_ns.t
-              }
-
-            let init =
-              { to_write = []
-              ; access_token
-              ; refresh_token
-              ; when_to_refresh
-              }
-          end
-        in
-        let rec send_remaining ?(num_failures = 0) (state : State.t) =
-          match state.to_write with
-          | [] -> return state
+        let tracks = Generate_spotify_tracks.tracks ~client songs in
+        let module State = struct
+            type t = { batch : Spotify.Track.t list }
+        end in
+        let send_batch (state : State.t) =
+          let batch =
+            List.rev state.batch
+            |> List.filter ~f:(fun { Spotify.Track.uri; _ } ->
+                  not (Set.mem uris_already_added_to_playlist uri))
+          in
+          match batch with
+          | [] -> return ()
           | tracks ->
-            let tracks =
-              List.rev tracks
-              |> List.filter ~f:(fun { Spotify.Track.uri; _ } ->
-                    not (Set.mem uris_in_playlist uri))
-            in
-            let request = Spotify.add_to_playlist ~access_token ~playlist ~tracks in
-            match%bind Cohttp_request_async.request request with
-            | Error e ->
-              if num_failures > 3 then Error.raise e;
-              if Time_ns.(<) (Time_ns.now ()) (state.when_to_refresh)
-              then (
-                print_endline "Waiting 30 sec...";
-                let%bind () = after (Time.Span.of_int_sec 30) in
-                send_remaining ~num_failures:(num_failures + 1) state)
-              else
-                let%bind
-                  { Spotify.Authorization_code_flow.access_token
-                  ; refresh_token
-                  ; expires_in
-                  }
-                =
-                  Spotify.Authorization_code_flow.refresh_access_token
-                    ~credentials
-                    state.refresh_token
-                  |> Cohttp_request_async.request
-                  >>| ok_exn
-                in
-                let when_to_refresh =
-                  Time_ns.add (Time_ns.now ()) (Time_ns.Span.of_int_sec expires_in)
-                in
-                send_remaining
-                  ~num_failures:(num_failures + 1)
-                  { to_write = state.to_write
-                  ; access_token
-                  ; refresh_token
-                  ; when_to_refresh
-                  }
-            | Ok () -> return { state with to_write = [] }
+            Spotify_async_client.add_to_playlist client ~playlist ~tracks
+            >>| ok_exn
         in
-        let digest ~(state : State.t) song track =
-          let state = { state with to_write = track :: state.to_write } in
-          if List.length state.to_write >= batch_size
+        let add_to_batch ~(state : State.t) song track =
+          let state = { State.batch = track :: state.batch } in
+          (* Always send the batch if we've gotten to the batch size, or if we're
+           * "pretty close to now" (i.e. we're streaming songs directly from the NPR
+           * playlist to the spotify playlist).
+           *)
+          if List.length state.batch >= batch_size
             || within_the_last song.Npr.Song.start_time ~span:(Time_ns.Span.of_min 8.)
-          then send_remaining state
+          then (
+            let%bind () = send_batch state in
+            return { State.batch = [] })
           else return state
         in
         let%bind final_state =
-          Pipe.fold tracks ~init:State.init ~f:(fun state track ->
-            match track with
-            | Error e -> Error.raise e
-            | Ok (`Skipping song) ->
+          Pipe.fold tracks ~init:{ State.batch = [] } ~f:(fun state track ->
+            match ok_exn track with
+            | `Skipping song ->
               printf
                 "Skipping \"%s\" (artist=\"%s\"; album=\"%s\")\n"
                 song.title
                 song.artist
                 (Option.value ~default:"" song.album);
               return state
-            | Ok (`Found (song, track)) -> digest ~state song track)
+            | `Found (song, track) -> add_to_batch ~state song track)
         in
-        send_remaining final_state |> Deferred.ignore_m)
+        send_batch final_state)

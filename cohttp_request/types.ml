@@ -26,12 +26,19 @@ module Body = struct
         ; body_to_yojson : (module Jsonable.To.S with type t = 'body)
         }
         -> t
+
+  let sexp_of_t = function
+    | Url_encoded body -> [%message "Url_encoded" (body : (string * string) list)]
+    | Json_encoded { body; body_to_yojson = (module Body) } ->
+      let yojson = Body.to_yojson body in
+      [%message "Json_encoded" ~body:(Yojson.Safe.to_string yojson : string)]
 end
 
 module Request_type = struct
   type t =
     | Get
     | Post of Body.t
+  [@@deriving sexp_of]
 end
 
 module Request = struct

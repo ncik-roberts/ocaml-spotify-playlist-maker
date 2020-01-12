@@ -1,19 +1,33 @@
 open Core
 open Async
 
+module Request_error = struct
+  type t =
+    { response_code : int
+    ; error : Error.t
+    }
+end
+
 let parse_response_body response response_body ~of_yojson =
-  match Cohttp.Response.status response with
-  | #Cohttp.Code.success_status ->
-    (match Or_error.try_with (fun () -> Yojson.Safe.from_string response_body) with
-     | Error error -> Error error
-     | Ok yojson -> of_yojson yojson |> Result.map_error ~f:Error.of_string)
-  | code ->
-    error_s
-      [%message "unexpected response code"
-        (code : Cohttp.Code.status_code)
-        (response : Cohttp.Response.t)
-        (response_body : string)
-      ]
+  let status = Cohttp.Response.status response in
+  let result =
+    match status with
+    | #Cohttp.Code.success_status ->
+      (match Or_error.try_with (fun () -> Yojson.Safe.from_string response_body) with
+       | Error error -> error_s [%message "JSON parsing failed" (error : Error.t)]
+       | Ok yojson -> of_yojson yojson |> Result.map_error ~f:Error.of_string)
+    | code ->
+      error_s
+        [%message "unexpected response code"
+          (code : Cohttp.Code.status_code)
+          (response : Cohttp.Response.t)
+          (response_body : string)
+        ]
+  in
+  match result with
+  | Ok result -> Ok result
+  | Error error ->
+    Error { Request_error.response_code = Cohttp.Code.code_of_status status; error }
 
 let request
   (type response)
@@ -54,5 +68,15 @@ let request
       Cohttp_async.Client.post ~headers ~body uri
   in
   let%bind response_body = Cohttp_async.Body.to_string response_body in
-  return (parse_response_body response response_body ~of_yojson:Response.of_yojson)
-
+  parse_response_body response response_body ~of_yojson:Response.of_yojson
+  |> Result.map_error ~f:(fun { Request_error.response_code; error } ->
+      let error =
+        Error.create_s
+          [%message "Got invalid response for request"
+            (error : Error.t)
+            ~uri:(Uri.to_string uri : string)
+            (headers : Cohttp.Header.t)
+            (request_type : Cohttp_request.Request_type.t)]
+      in
+      { Request_error.response_code; error })
+  |> return

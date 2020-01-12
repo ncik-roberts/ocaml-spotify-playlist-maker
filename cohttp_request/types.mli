@@ -30,6 +30,7 @@ module Request_type : sig
   type t =
     | Get
     | Post of Body.t
+  [@@deriving sexp_of]
 end
 
 module Request : sig

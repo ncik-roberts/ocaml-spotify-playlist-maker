@@ -78,8 +78,9 @@ let wrap_in_current_access_token t request =
       (* https://developer.spotify.com/documentation/web-api/#response-status-codes *)
       match response_code with
       | 429 -> (* Too many requests *)
-        print_endline "Waiting 30 sec...";
-        let%bind () = after (Time.Span.of_int_sec 30) in
+        let rate_limit_sec = 10 in
+        printf "Waiting %d sec...\n" rate_limit_sec;
+        let%bind () = after (Time.Span.of_int_sec rate_limit_sec) in
         loop ~num_failures:(num_failures + 1)
       | 401 -> (* Unauthorized *)
         let time_before_we_need_to_refresh =
@@ -126,7 +127,7 @@ let all_tracks_in_playlist t ~playlist =
   in
   let open Deferred.Or_error.Let_syntax in
   let%bind tracks = get_tracks ~offset:0 in
-  if tracks.total <= 100 then return tracks.items
+  if tracks.total <= limit then return tracks.items
   else
     let rec loop offset ~state =
       if offset >= tracks.total then return (List.rev state)

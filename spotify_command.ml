@@ -8,7 +8,7 @@ let make_time date hour ~zone =
 let within_the_last time ~span =
   Time_ns.Span.(<) (Time_ns.diff (Time_ns.now ()) time) span
 
-let create_client config =
+let prompt_in_web_browser_for_authorization config =
   let client_uri, result = Spotify_async_client.create config in
   match%bind Process.run ~prog:"xdg-open" ~args:[ Uri.to_string client_uri ] () with
   | Error _ as error -> return error
@@ -105,7 +105,8 @@ let command =
          | None -> [ `Playlist_modify_private ]
        in
        let%bind client =
-         create_client { port; scopes; user_id; credentials } >>| ok_exn
+         prompt_in_web_browser_for_authorization { port; scopes; user_id; credentials }
+         >>| ok_exn
        in
         let%bind playlist, uris_already_added_to_playlist =
           match playlist_id with

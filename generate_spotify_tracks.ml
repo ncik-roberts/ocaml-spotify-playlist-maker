@@ -47,9 +47,10 @@ let tracks
         let rec loop = function
           | [] -> Ok (`Skipping song) |> Pipe.write writer
           | query :: queries ->
-            (match%bind Spotify.search_tracks ~access_token ~query with
-             | Ok (track :: _) -> Pipe.write writer (Ok (`Found (song, track)))
-             | Ok [] -> loop queries
+            let request = Spotify.search_tracks ~limit:1 ~access_token ~query () in
+            (match%bind Cohttp_request_async.request request with
+             | Ok { items = track :: _; _ } -> Pipe.write writer (Ok (`Found (song, track)))
+             | Ok { items = []; _ } -> loop queries
              | Error e ->
                if !num_failures > 3
                then

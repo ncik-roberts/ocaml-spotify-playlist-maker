@@ -1,6 +1,6 @@
 (library
- (name cohttp_async_utils)
- (libraries core cohttp cohttp-async)
+ (name cohttp_request_async)
+ (libraries core cohttp cohttp-async cohttp_request)
   (preprocess (
     pps
     ppx_compare

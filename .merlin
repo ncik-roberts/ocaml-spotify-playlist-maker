@@ -87,7 +87,8 @@ B /home/nick/.opam/4.07.1+flambda/lib/uri/services
 B /home/nick/.opam/4.07.1+flambda/lib/variantslib
 B /home/nick/.opam/4.07.1+flambda/lib/yojson
 B _build/default/.main.eobjs/byte
-B _build/default/cohttp_async_utils/.cohttp_async_utils.objs/byte
+B _build/default/cohttp_request/.cohttp_request.objs/byte
+B _build/default/cohttp_request_async/.cohttp_request_async.objs/byte
 B _build/default/npr/.npr.objs/byte
 B _build/default/spotify/.spotify.objs/byte
 S /home/nick/.opam/4.07.1+flambda/lib/astring
@@ -178,7 +179,8 @@ S /home/nick/.opam/4.07.1+flambda/lib/uri/services
 S /home/nick/.opam/4.07.1+flambda/lib/variantslib
 S /home/nick/.opam/4.07.1+flambda/lib/yojson
 S .
-S cohttp_async_utils
+S cohttp_request
+S cohttp_request_async
 S npr
 S spotify
 FLG -ppx '/home/nick/Documents/hacking/ocaml/spotify/_build/default/.ppx/a5b2d3e48ccd8500e72aaebeb7c56322/ppx.exe --as-ppx'

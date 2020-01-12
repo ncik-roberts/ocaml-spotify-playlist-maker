@@ -1,10 +1,6 @@
 open Core
 open Async
 
-let debug = ref false
-
-let set_debug_mode = (:=) debug
-
 let base_uri station_id =
   sprintf
     "https://api.composer.nprstations.org/v1/widget/%s/playlist"
@@ -62,12 +58,12 @@ let query t time =
       ; "time", [ sprintf "%02d:%02d" parts.hr parts.min ]
       ]
   in
-  if !debug then printf !"NPR request: %{Uri}\n" uri;
-  Cohttp_async.Client.get uri
-
-let parse_query_body response body =
-  Cohttp_async_utils.parse_response_body response body ~of_yojson:Playlist.of_yojson
-  |> Result.map ~f:(fun { Playlist.playlist } ->
+  { Cohttp_request.uri
+  ; request_type = Get
+  ; headers = Cohttp.Header.init ()
+  ; response_of_yojson = (module Playlist)
+  }
+  |> Cohttp_request.map ~f:(fun { Playlist.playlist } ->
       List.concat_map playlist ~f:(fun { playlist } -> playlist))
 
 let externalize_song song ~start_time =
@@ -128,9 +124,8 @@ let lookup_until_done t writer ~from ~done_ ~in_range =
     if done_ time then Deferred.unit
     else
       let%bind () = Backoff.wait backoff in
-      let%bind (response, body) = query t time in
-      let%bind body = Cohttp_async.Body.to_string body in
-      match parse_query_body response body with
+      let%bind songs = Cohttp_request_async.request (query t time) in
+      match songs with
       | Error e -> Pipe.write_if_open writer (Error e)
       | Ok [] -> loop (add_some_time time) time song_ids (Backoff.increase backoff)
       | Ok songs ->

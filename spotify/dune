@@ -1,6 +1,6 @@
 (library
  (name spotify)
- (libraries core cohttp cohttp-async cohttp_async_utils)
+ (libraries core cohttp cohttp-async cohttp_request)
   (preprocess (
     pps
     ppx_compare

@@ -3,8 +3,6 @@ open Async
 
 type t [@@deriving sexp_of]
 
-val set_debug_mode : bool -> unit
-
 module Song : sig
   type t =
    { title : string

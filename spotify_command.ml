@@ -18,7 +18,6 @@ let command =
        flag ~aliases:["bh"] "--begin-hour"
          (optional_with_default 0 int)
          ~doc:"0 Start hour (military; incl)"
-     and debug = flag "--debug" no_arg ~doc:" Turn on debug mode"
      and end_ =
        flag ~aliases:["e"] "--end"
          (optional date)
@@ -54,8 +53,6 @@ let command =
      in
      fun () ->
        let open Deferred.Let_syntax in
-       Npr.set_debug_mode debug;
-       Spotify.set_debug_mode debug;
        let zone = force Time_ns.Zone.local in
        let today = Date.today ~zone in
        let begin_ = Option.value begin_ ~default:today in
@@ -93,12 +90,14 @@ let command =
         in
         let%bind client_credentials_flow =
           Spotify.Client_credentials_flow.get_access_token ~credentials
+          |> Cohttp_request_async.request
           >>| ok_exn
         in
         let%bind authorization_code_flow =
           Spotify.Authorization_code_flow.get_access_token
             authorization_code
             ~credentials
+          |> Cohttp_request_async.request
           >>| ok_exn
         in
         let { Spotify.Authorization_code_flow.access_token; refresh_token; expires_in } =
@@ -111,13 +110,15 @@ let command =
           match playlist_id with
           | Some playlist ->
             let playlist = Spotify.Playlist.of_id playlist in
-            let%bind uris_in_playlist =
+            let%bind items_in_playlist =
               Spotify.lookup_playlist
                 ~access_token
                 ~playlist
+                ()
+              |> Cohttp_request_async.request
               >>| ok_exn
-              >>| List.map ~f:(fun x -> x.Spotify.Track.uri)
             in
+            let uris_in_playlist = List.map items_in_playlist.items ~f:(fun x -> x.uri) in
             return (playlist, String.Set.of_list uris_in_playlist)
           | None ->
             let playlist_name =
@@ -141,6 +142,7 @@ let command =
                 ~access_token
                 ~user_id
                 ~name:playlist_name
+              |> Cohttp_request_async.request
               >>| ok_exn
             in
             return (playlist, String.Set.empty)
@@ -177,7 +179,8 @@ let command =
               |> List.filter ~f:(fun { Spotify.Track.uri; _ } ->
                     not (Set.mem uris_in_playlist uri))
             in
-            match%bind Spotify.add_to_playlist ~access_token ~playlist ~tracks with
+            let request = Spotify.add_to_playlist ~access_token ~playlist ~tracks in
+            match%bind Cohttp_request_async.request request with
             | Error e ->
               if num_failures > 3 then Error.raise e;
               if Time_ns.(<) (Time_ns.now ()) (state.when_to_refresh)
@@ -195,6 +198,7 @@ let command =
                   Spotify.Authorization_code_flow.refresh_access_token
                     ~credentials
                     state.refresh_token
+                  |> Cohttp_request_async.request
                   >>| ok_exn
                 in
                 let when_to_refresh =

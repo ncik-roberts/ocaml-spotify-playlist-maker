@@ -1,5 +1,4 @@
 open Core
-open Async
 
 module Credentials = struct
   type t =
@@ -11,14 +10,9 @@ module Credentials = struct
   let create = Fields.create
 end
 
-let debug = ref false
-let set_debug_mode = (:=) debug
-
 module Access_token = struct
   type _ t = string
 end
-
-let random_state = Random.State.make_self_init ()
 
 module Scope = struct
   type t =
@@ -63,39 +57,34 @@ module Scope = struct
     | `User_top_read -> "user-top-read"
 end
 
-module type Jsonable = sig
-  type t [@@deriving yojson]
-end
-
-module Ignore_json_result : Jsonable with type t = unit = struct
-  type t = unit [@@deriving yojson]
-
-  let of_yojson _ = Ok ()
-end
-
 module Get_access_token = struct
   let get_access_token
+      (type response)
       ~body
       ~credentials:{ Credentials.client_id; client_secret }
-      ~of_yojson
+      ~(response_of_yojson : Yojson.Safe.t -> (response, string) Result.t)
     =
     let uri = Uri.of_string "https://accounts.spotify.com/api/token" in
     match Base64.encode (sprintf "%s:%s" client_id client_secret) with
-    | Error (`Msg error) -> return (Error (Error.of_string error))
+    | Error (`Msg error) ->
+      failwithf
+        "Base64 encoding of the credentials failed -- bug in Base64 library?\
+        \ Original error: %s"
+        error
+        ()
     | Ok base64_encoded ->
-      let headers =
-        Cohttp.Header.of_list
-          [ "Authorization", sprintf "Basic %s" base64_encoded
-          ; "Content-Type", "application/x-www-form-urlencoded"
-          ]
-      in
-      let body = String.concat body ~sep:"&" |> Cohttp_async.Body.of_string in
-      let%bind response, response_body =
-        Cohttp_async.Client.post ~body ~headers uri
-      in
-      if !debug then print_endline "Requesting access token...";
-      let%bind response_body = Cohttp_async.Body.to_string response_body in
-      return (Cohttp_async_utils.parse_response_body response response_body ~of_yojson)
+      { Cohttp_request.uri
+      ; headers =
+          Cohttp.Header.of_list
+            [ "Authorization", sprintf "Basic %s" base64_encoded
+            ; "Content-Type", "application/x-www-form-urlencoded"
+            ]
+      ; request_type = Post (Url_encoded body)
+      ; response_of_yojson =
+          (module struct
+            type t = response [@@deriving of_yojson]
+          end)
+      }
 end
 
 module Client_credentials_flow = struct
@@ -110,7 +99,9 @@ module Client_credentials_flow = struct
     [@@deriving yojson { strict = false }]
 
   let get_access_token =
-    Get_access_token.get_access_token ~of_yojson ~body:[ "grant_type=client_credentials" ]
+    Get_access_token.get_access_token
+      ~response_of_yojson:of_yojson
+      ~body:[ "grant_type", "client_credentials" ]
 end
 
 module Authorization_code_flow = struct
@@ -141,12 +132,14 @@ module Authorization_code_flow = struct
     }
     [@@deriving yojson { strict = false }]
 
+  let secret_state = lazy (Random.State.make_self_init ())
+
   let generate_client_uri_for_authorization_code
       ~client_id
       ~redirect_uri
       ~scopes
     =
-    let secret_state = Random.State.bits random_state |> sprintf "%x" in
+    let secret_state = Random.State.bits (force secret_state) |> sprintf "%x" in
     let base_uri = Uri.of_string "https://accounts.spotify.com/authorize" in
     let uri = Uri.add_query_params base_uri
       [ "client_id", [ client_id ]
@@ -160,24 +153,24 @@ module Authorization_code_flow = struct
 
   let get_access_token { Authorization_code.redirect_uri; code } =
     Get_access_token.get_access_token
-      ~of_yojson
+      ~response_of_yojson:of_yojson
       ~body:
-        [ "grant_type=authorization_code"
-        ; sprintf !"redirect_uri=%{Uri}" redirect_uri
-        ; sprintf "code=%s" code
+        [ "grant_type", "authorization_code"
+        ; "redirect_uri", Uri.to_string redirect_uri
+        ; "code", code
         ]
 
   let refresh_access_token refresh_token =
     Get_access_token.get_access_token
-      ~of_yojson
+      ~response_of_yojson:of_yojson
       ~body:
-        [ "grant_type=refresh_token"
-        ; sprintf "refresh_token=%s" refresh_token
+        [ "grant_type", "refresh_token"
+        ; "refresh_token", refresh_token
         ]
 end
 
 module Query = struct
-  type t = string [@@deriving sexp, compare]
+  type t = string [@@deriving compare]
 
   let create ~album ~artist ~track =
     [ "album", album
@@ -195,11 +188,16 @@ module Track = struct
     { uri : string
     ; name : string
     }
-    [@@deriving sexp_of, yojson { strict = false }]
+    [@@deriving yojson { strict = false }]
 end
 
 module Paging_object = struct
-  type 'a t = { items : 'a list; total : int }
+  type 'a t =
+    { items : 'a list
+    ; limit : int
+    ; offset : int
+    ; total : int
+    }
     [@@deriving yojson { strict = false }]
 
   let map ~f t = { t with items = List.map ~f t.items }
@@ -217,39 +215,19 @@ module Playlist = struct
   let of_id id = { id }
 end
 
-let request
-    (type request response)
-    ~(request : [ `Get | `Post of request * (module Jsonable with type t = request) ])
-    ~response:(module Response : Jsonable with type t = response)
-    ~access_token
-    ~uri
-    : response Or_error.t Deferred.t
-  =
-  let content_type_header =
-    match request with
-    | `Get -> None
-    | `Post _ -> Some ("Content-Type", "application/json")
-  in
-  let headers =
-    [ Some ("Authorization", sprintf "Bearer %s" access_token)
-    ; content_type_header
-    ]
-    |> List.filter_map ~f:Fn.id
-    |> Cohttp.Header.of_list
-  in
-  let%bind response, body =
-    match request with
-    | `Get ->
-      if !debug then printf !"Getting %{Uri}\n" uri;
-      Cohttp_async.Client.get uri ~headers
-    | `Post (body, (module J)) ->
-      let body = J.to_yojson body |> Yojson.Safe.to_string in
-      if !debug then printf !"Posting %{Uri}\n" uri;
-      Cohttp_async.Client.post uri ~headers ~body:(Cohttp_async.Body.of_string body)
-  in
-  let%bind body = Cohttp_async.Body.to_string body in
-  Cohttp_async_utils.parse_response_body response body ~of_yojson:Response.of_yojson
-  |> return
+let paging_query_params ~offset ~limit =
+  [ Option.map offset ~f:(fun offset -> ("offset", [ sprintf "%d" offset ]))
+  ; Option.map limit ~f:(fun limit -> "limit", [ sprintf "%d" limit ])
+  ]
+  |> List.filter_map ~f:Fn.id
+
+let request ~access_token ~uri ~request ~response =
+  { Cohttp_request.uri
+  ; headers =
+      Cohttp.Header.of_list [ "Authorization", sprintf "Bearer %s" access_token ]
+  ; request_type = request
+  ; response_of_yojson = response
+  }
 
 let make_playlist ~kind ~access_token ~user_id ~name =
   let uri =
@@ -265,10 +243,11 @@ let make_playlist ~kind ~access_token ~user_id ~name =
     | `Public -> true
     | `Private -> false
   in
+  let body = { Playlist_body.name; public } in
   request
-    ~access_token
     ~uri
-    ~request:(`Post ({ Playlist_body.name; public }, (module Playlist_body)))
+    ~access_token
+    ~request:(Post (Json_encoded { body; body_to_yojson = (module Playlist_body) }))
     ~response:(module Playlist)
 
 let add_to_playlist ~access_token ~(playlist : Playlist.t) ~(tracks : Track.t list) =
@@ -286,53 +265,41 @@ let add_to_playlist ~access_token ~(playlist : Playlist.t) ~(tracks : Track.t li
   request
     ~access_token
     ~uri
-    ~request:(`Post (body, (module Add_to_playlist_body)))
-    ~response:(module Ignore_json_result)
+    ~request:(Post (Json_encoded { body; body_to_yojson = (module Add_to_playlist_body) }))
+    ~response:(module Cohttp_request.Jsonable.Ignore)
 
-let search_tracks ~access_token ~query =
+let search_tracks ?offset ?limit () ~access_token ~query =
   let uri =
     let base_uri = Uri.of_string "https://api.spotify.com/v1/search" in
     Uri.add_query_params base_uri
-      [ "q", [ query ]
-      ; "type", [ "track" ]
-      ]
+      ([ "q", [ query ]
+       ; "type", [ "track" ]
+       ]
+       @ paging_query_params ~offset ~limit)
   in
   request
     ~access_token
     ~uri
-    ~request:`Get
+    ~request:Get
     ~response:(module Tracks)
-  >>| Result.map ~f:(fun x -> x.Tracks.tracks.items)
+  |> Cohttp_request.map ~f:(fun x -> x.Tracks.tracks)
 
 module Playlist_item = struct
   type t = { track : Track.t } [@@deriving yojson { strict = false }]
 end
 
-let lookup_playlist ~access_token ~(playlist : Playlist.t) =
+let lookup_playlist ?offset ?limit () ~access_token ~(playlist : Playlist.t) =
   let uri =
     sprintf "https://api.spotify.com/v1/playlists/%s/tracks" playlist.id
     |> Uri.of_string
   in
-  let open Deferred.Or_error.Let_syntax in
-  let get_tracks ~offset =
-    let uri = Uri.add_query_param uri ("offset", [ sprintf "%d" offset ]) in
-    request
-      ~access_token
-      ~uri
-      ~request:`Get
-      ~response:(module struct
-        type t = Playlist_item.t Paging_object.t [@@deriving yojson { strict = false }]
-      end)
-    >>| Paging_object.map ~f:(fun { Playlist_item.track } -> track)
-  in
-  let%bind tracks = get_tracks ~offset:0 in
-  if tracks.total <= 100 then return tracks.items
-  else
-    let rec loop offset ~state =
-      if offset >= tracks.total then return (List.rev state)
-      else
-        let%bind tracks = get_tracks ~offset in
-        loop (offset + 100) ~state:(List.rev tracks.items @ state)
-    in
-    loop 100 ~state:(List.rev tracks.items)
-
+  let query_params = paging_query_params ~offset ~limit in
+  let uri = Uri.add_query_params uri query_params in
+  request
+    ~access_token
+    ~uri
+    ~request:Get
+    ~response:(module struct
+       type t = Playlist_item.t Paging_object.t [@@deriving yojson]
+     end)
+  |> Cohttp_request.map ~f:(Paging_object.map ~f:(fun item -> item.Playlist_item.track))

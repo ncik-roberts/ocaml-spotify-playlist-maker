@@ -1,8 +1,3 @@
-open Core
-open Async
-
-val set_debug_mode : bool -> unit
-
 module Credentials : sig
   type t
 
@@ -23,7 +18,7 @@ module Client_credentials_flow : sig
     ; expires_in : int
     }
 
-  val get_access_token : credentials:Credentials.t -> t Or_error.t Deferred.t
+  val get_access_token : credentials:Credentials.t -> t Cohttp_request.t
 end
 
 module Scope : sig
@@ -79,16 +74,16 @@ module Authorization_code_flow : sig
   val get_access_token
     :  Authorization_code.t
     -> credentials:Credentials.t
-    -> t Or_error.t Deferred.t
+    -> t Cohttp_request.t
 
   val refresh_access_token
     :  Refresh_token.t
     -> credentials:Credentials.t
-    -> t Or_error.t Deferred.t
+    -> t Cohttp_request.t
 end
 
 module Query : sig
-  type t [@@deriving sexp_of, compare]
+  type t [@@deriving compare]
 
   val create
     :  album:string option
@@ -102,7 +97,6 @@ module Track : sig
     { uri : string
     ; name : string
     }
-    [@@deriving sexp_of]
 end
 
 module Playlist : sig
@@ -110,25 +104,41 @@ module Playlist : sig
   val of_id : string -> t
 end
 
+module Paging_object : sig
+  type 'a t =
+    { items : 'a list
+    ; limit : int
+    ; offset : int
+    ; total : int
+    }
+  [@@deriving yojson]
+end
+
 val make_playlist
   :  kind:[ `Private | `Public ]
   -> access_token:Authorization_code_flow.Access_token.t
   -> user_id:string
   -> name:string
-  -> Playlist.t Or_error.t Deferred.t
+  -> Playlist.t Cohttp_request.t
 
 val add_to_playlist
   :  access_token:Authorization_code_flow.Access_token.t
   -> playlist:Playlist.t
   -> tracks:Track.t list
-  -> unit Or_error.t Deferred.t
+  -> unit Cohttp_request.t
 
 val search_tracks
-  :  access_token:_ Access_token.t
+  :  ?offset:int
+  -> ?limit:int
+  -> unit
+  -> access_token:_ Access_token.t
   -> query:Query.t
-  -> Track.t list Or_error.t Deferred.t
+  -> Track.t Paging_object.t Cohttp_request.t
 
 val lookup_playlist
-  :  access_token:_ Access_token.t
+  :  ?offset:int
+  -> ?limit:int
+  -> unit
+  -> access_token:_ Access_token.t
   -> playlist:Playlist.t
-  -> Track.t list Or_error.t Deferred.t
+  -> Track.t Paging_object.t Cohttp_request.t

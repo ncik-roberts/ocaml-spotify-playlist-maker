@@ -48,7 +48,6 @@ let tracks
     (songs : Npr.Song.t Or_error.t Pipe.Reader.t)
     ~(client : Spotify_async_client.t)
   =
-  let num_failures = ref 0 in
   Pipe.create_reader ~close_on_exception:true (fun writer ->
     Pipe.iter songs ~f:(fun song_or_error ->
       match song_or_error with
@@ -63,13 +62,7 @@ let tracks
              | Ok (Some track) -> Pipe.write writer (Ok (`Found (song, track)))
              | Ok None -> loop queries
              | Error e ->
-               if !num_failures > 3
-               then
-                 error_s [%message "Too many failures" (e : Error.t)]
-                 |> Pipe.write writer
-               else (
-                 print_endline "Waiting 30 sec...";
-                 let%bind () = after (sec 30.) in
-                 loop (query :: queries)))
+               error_s [%message "Spotify client returned with error" (e : Error.t)]
+               |> Pipe.write writer)
         in
         loop (queries song)))

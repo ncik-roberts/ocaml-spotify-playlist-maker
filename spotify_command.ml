@@ -14,7 +14,7 @@ let create_client config =
   | Error _ as error -> return error
   | Ok (_output : string) ->result
 
-let playlist_name ~begin_ ~end_ ~begin_time ~end_time =
+let generate_playlist_name ~begin_ ~end_ ~begin_time ~end_time =
   let suffix =
     if Date.equal begin_ end_
     then sprintf "%s, from %d:00 til %d:59"
@@ -30,13 +30,10 @@ let playlist_name ~begin_ ~end_ ~begin_time ~end_time =
   sprintf "WYEP Playlist %s" suffix
 
 let credentials ~credentials_file =
-  let `Client_id client_id, `Client_secret client_secret =
-    match In_channel.read_lines credentials_file with
-    | [ client_id; client_secret ] ->
-      `Client_id client_id, `Client_secret client_secret
-    | _ -> failwith ("Invalid file " ^ credentials_file)
-  in
-  Spotify.Credentials.create ~client_id ~client_secret
+  match In_channel.read_lines credentials_file with
+  | [ client_id; client_secret ] ->
+    Spotify.Credentials.create ~client_id ~client_secret
+  | _ -> failwith ("Invalid file " ^ credentials_file)
 
 let command =
   Command.async
@@ -66,6 +63,10 @@ let command =
        flag "--playlist-id"
          (optional string)
          ~doc:"playlist_id The playlist to append to (creates a new playlist if omitted)"
+     and playlist_name =
+       flag "--playlist-name"
+         (optional string)
+         ~doc:"playlist_name The name for the playlist. Auto-generated based on the date if omitted. Cannot be combined with --playlist-id."
      and batch_size =
        flag "--batch-size"
          (optional_with_default 20 int)
@@ -117,7 +118,11 @@ let command =
             let uris_in_playlist = List.map items_in_playlist ~f:(fun x -> x.uri) in
             return (playlist, String.Set.of_list uris_in_playlist)
           | None ->
-            let playlist_name = playlist_name ~begin_ ~end_ ~begin_time ~end_time in
+            let playlist_name =
+              match playlist_name with
+              | None -> generate_playlist_name ~begin_ ~end_ ~begin_time ~end_time
+              | Some playlist_name -> playlist_name
+            in
             let%bind playlist =
               Spotify_async_client.make_playlist
                 client

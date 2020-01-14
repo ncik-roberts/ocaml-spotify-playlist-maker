@@ -151,8 +151,9 @@ module Authorization_code_flow = struct
     in
     uri, `Secret_state secret_state
 
-  let get_access_token { Authorization_code.redirect_uri; code } =
+  let get_access_token { Authorization_code.redirect_uri; code } ~credentials =
     Get_access_token.get_access_token
+      ~credentials
       ~response_of_yojson:of_yojson
       ~body:
         [ "grant_type", "authorization_code"
@@ -160,13 +161,25 @@ module Authorization_code_flow = struct
         ; "code", code
         ]
 
-  let refresh_access_token refresh_token =
+  let refresh_access_token refresh_token ~credentials =
+    let
+      module Access_token_without_refresh_token = struct
+        type t =
+          { access_token : Access_token.t
+          ; expires_in : int
+          }
+          [@@deriving yojson { strict = false }]
+      end
+    in
     Get_access_token.get_access_token
-      ~response_of_yojson:of_yojson
+      ~credentials
+      ~response_of_yojson:Access_token_without_refresh_token.of_yojson
       ~body:
         [ "grant_type", "refresh_token"
         ; "refresh_token", refresh_token
         ]
+    |> Cohttp_request.map ~f:(fun { Access_token_without_refresh_token.access_token; expires_in } ->
+        { access_token; expires_in; refresh_token })
 end
 
 module Query = struct

@@ -1,11 +1,6 @@
 (library
  (name cohttp_request)
  (libraries core cohttp)
-  (preprocess (
-    pps
-    ppx_deriving.std
-    ppx_deriving_yojson
-    ppx_let
-    ppx_sexp_conv
-    ppx_sexp_message
-   )))
+ (preprocess
+  (pps ppx_deriving.std ppx_deriving_yojson ppx_let ppx_sexp_conv
+    ppx_sexp_message)))

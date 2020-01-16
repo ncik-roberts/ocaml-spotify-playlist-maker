@@ -1,14 +1,6 @@
 (library
  (name spotify_async_client)
  (libraries core cohttp cohttp-async npr spotify)
-  (preprocess (
-    pps
-    ppx_compare
-    ppx_custom_printf
-    ppx_deriving.std
-    ppx_deriving_yojson
-    ppx_fields_conv
-    ppx_let
-    ppx_sexp_conv
-    ppx_sexp_message
-   )))
+ (preprocess
+  (pps ppx_compare ppx_custom_printf ppx_deriving.std ppx_deriving_yojson
+    ppx_fields_conv ppx_let ppx_sexp_conv ppx_sexp_message)))

@@ -7,7 +7,10 @@ let base_uri station_id =
     station_id
   |> Uri.of_string
 
-type t = { station_id : string } [@@deriving sexp_of]
+type t =
+  { station_id : string
+  ; cohttp_request_async_client : Cohttp_request_async_client.t
+  }
 
 module Song = struct
   module External = struct
@@ -41,7 +44,13 @@ module Playlist = struct
 end
 
 
-let create ~station_id = { station_id }
+let create ~debug_mode ~station_id =
+  let cohttp_request_async_client =
+    Cohttp_request_async_client.create
+      ~debug_mode:(
+        if debug_mode then Some { print_requests = true; print_responses = false } else None)
+  in
+  { station_id; cohttp_request_async_client }
 
 let query t time =
   let date, time_ofday =
@@ -124,7 +133,8 @@ let lookup_until_done t writer ~from ~done_ ~in_range =
     if done_ time then Deferred.unit
     else
       let%bind () = Backoff.wait backoff in
-      let%bind songs = Cohttp_request_async.request (query t time) in
+      let request = query t time in
+      let%bind songs = Cohttp_request_async_client.request t.cohttp_request_async_client request in
       match songs with
       | Error { response_code = _; error } -> Pipe.write_if_open writer (Error error)
       | Ok [] -> loop (add_some_time time) time song_ids (Backoff.increase backoff)

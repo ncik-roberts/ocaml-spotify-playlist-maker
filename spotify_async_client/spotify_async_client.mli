@@ -12,6 +12,7 @@ module Config : sig
     ; credentials : Spotify.Credentials.t
     ; scopes : Spotify.Scope.t list
     ; user_id : string
+    ; debug : bool
     }
 end
 

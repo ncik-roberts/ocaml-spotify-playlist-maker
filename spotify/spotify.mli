@@ -103,7 +103,7 @@ end
 
 module Playlist : sig
   type t
-  val of_id : string -> t
+  val parse : [ `Uri of string | `Id of string ] -> (t, [ `Invalid_playlist ]) result
 end
 
 module Paging_object : sig

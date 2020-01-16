@@ -1,5 +1,5 @@
 (library
- (name cohttp_request_async)
+ (name cohttp_request_async_client)
  (libraries core cohttp cohttp-async cohttp_request)
   (preprocess (
     pps

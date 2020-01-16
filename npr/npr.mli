@@ -1,7 +1,7 @@
 open Core
 open Async
 
-type t [@@deriving sexp_of]
+type t
 
 module Song : sig
   type t =
@@ -13,7 +13,7 @@ module Song : sig
    [@@deriving sexp_of]
 end
 
-val create : station_id:string -> t
+val create : debug_mode:bool -> station_id:string -> t
 
 val lookup_songs
   :  t

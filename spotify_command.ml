@@ -59,10 +59,10 @@ let command =
        flag ~aliases:["u"] "--user-id"
          (optional_with_default "ncik_roberts" string)
          ~doc:"ncik_roberts Spotify user id"
-     and playlist_id =
-       flag "--playlist-id"
+     and playlist_uri =
+       flag "--playlist-uri"
          (optional string)
-         ~doc:"playlist_id The playlist to append to (creates a new playlist if omitted)"
+         ~doc:"playlist_uri The playlist to append to (creates a new playlist if omitted)"
      and playlist_name =
        flag "--playlist-name"
          (optional string)
@@ -75,6 +75,7 @@ let command =
        flag "--station-id"
          (optional_with_default "50e451b6a93e91ee0a00028e" string)
          ~doc:" station id to query"
+     and debug = flag "--debug" no_arg ~doc:" debug mode (print a lot)"
      and port =
        flag "--port"
          (optional_with_default 8888 int)
@@ -91,12 +92,12 @@ let command =
        let begin_ = Option.value begin_ ~default:today in
        let end_ = Option.value end_ ~default:today in
        let end_time = Option.value end_time ~default:24 in
-       let npr = Npr.create ~station_id in
+       let npr = Npr.create ~debug_mode:debug ~station_id in
        let from = make_time ~zone begin_ begin_time in
        let until = make_time ~zone end_ end_time in
        let credentials = credentials ~credentials_file in
        let scopes =
-         match playlist_id with
+         match playlist_uri with
          | Some _ ->
            [ `Playlist_modify_public
            ; `Playlist_modify_private
@@ -105,13 +106,15 @@ let command =
          | None -> [ `Playlist_modify_private ]
        in
        let%bind client =
-         prompt_in_web_browser_for_authorization { port; scopes; user_id; credentials }
+         prompt_in_web_browser_for_authorization
+           { port; scopes; user_id; credentials; debug }
          >>| ok_exn
        in
         let%bind playlist, uris_already_added_to_playlist =
-          match playlist_id with
-          | Some playlist ->
-            let playlist = Spotify.Playlist.of_id playlist in
+          match playlist_uri |> Option.map ~f:(fun uri -> Spotify.Playlist.parse (`Uri uri)) with
+          | Some Error `Invalid_playlist ->
+            raise_s [%message "Invalid playlist uri" (playlist_uri : string option)]
+          | Some (Ok playlist) ->
             let%bind items_in_playlist =
               Spotify_async_client.all_tracks_in_playlist client ~playlist
               >>| ok_exn

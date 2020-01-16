@@ -8,7 +8,23 @@ module Request_error = struct
     }
 end
 
-let parse_response_body response response_body ~of_yojson =
+module Debug_mode = struct
+  type t =
+    { print_requests : bool
+    ; print_responses : bool
+    }
+end
+
+type t = { debug_mode : Debug_mode.t }
+
+let create ~debug_mode =
+  Option.value_map
+    debug_mode
+    ~f:(fun debug_mode -> { debug_mode })
+    ~default:{ debug_mode = { print_requests = false; print_responses = false } }
+
+let parse_response_body t response response_body ~of_yojson =
+  if t.debug_mode.print_responses then print_endline response_body;
   let status = Cohttp.Response.status response in
   let result =
     match status with
@@ -31,12 +47,14 @@ let parse_response_body response response_body ~of_yojson =
 
 let request
   (type response)
+  t
   ({ headers
    ; uri
    ; request_type
    ; response_of_yojson =
        (module Response : Cohttp_request.Jsonable.Of.S with type t = response)
    } : response Cohttp_request.t) =
+  if t.debug_mode.print_requests then print_endline (Uri.to_string uri);
   let%bind response, response_body =
     match request_type with
     | Get -> Cohttp_async.Client.get ~headers uri
@@ -68,7 +86,7 @@ let request
       Cohttp_async.Client.post ~headers ~body uri
   in
   let%bind response_body = Cohttp_async.Body.to_string response_body in
-  parse_response_body response response_body ~of_yojson:Response.of_yojson
+  parse_response_body t response response_body ~of_yojson:Response.of_yojson
   |> Result.map_error ~f:(fun { Request_error.response_code; error } ->
       let error =
         Error.create_s

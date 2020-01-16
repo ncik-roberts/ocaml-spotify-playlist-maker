@@ -10,6 +10,7 @@ module Config = struct
     ; credentials : Spotify.Credentials.t
     ; scopes : Spotify.Scope.t list
     ; user_id : string
+    ; debug : bool
     }
 end
 
@@ -23,11 +24,12 @@ end
 
 type t =
   { config : Config.t
+  ; cohttp_request_async_client : Cohttp_request_async_client.t
   ; mutable current_access_token : Current_access_token.t
   }
 
 let ignore_response_code
-  (deferred : ('a, Cohttp_request_async.Request_error.t) Result.t Deferred.t)
+  (deferred : ('a, Cohttp_request_async_client.Request_error.t) Result.t Deferred.t)
   : 'a Or_error.t Deferred.t =
     match%map deferred with
     | Ok x -> Ok x
@@ -38,6 +40,14 @@ let ignore_response_code
  *)
 let create (config : Config.t) =
   let open Deferred.Or_error.Let_syntax in
+  let debug_mode : Cohttp_request_async_client.Debug_mode.t option =
+    if config.debug
+    then Some { print_requests = true; print_responses = true }
+    else None
+  in
+  let cohttp_request_async_client =
+    Cohttp_request_async_client.create ~debug_mode
+  in
   let uri, authorization_code_deferred =
     Spotify_authorization_code_server.listen_for_authorization_code
       ~client_id:(Spotify.Credentials.client_id config.credentials)
@@ -52,7 +62,8 @@ let create (config : Config.t) =
       ; expires_in
       }
     =
-      Cohttp_request_async.request
+      Cohttp_request_async_client.request
+        cohttp_request_async_client
         (Spotify.Authorization_code_flow.get_access_token
           authorization_code
           ~credentials:config.credentials)
@@ -61,7 +72,10 @@ let create (config : Config.t) =
     let when_to_refresh =
       Time_ns.add (Time_ns.now ()) (Time_ns.Span.of_int_sec expires_in)
     in
-    { config; current_access_token = { access_token; refresh_token; when_to_refresh } }
+    { config
+    ; cohttp_request_async_client
+    ; current_access_token = { access_token; refresh_token; when_to_refresh }
+    }
     |> return
   in
   uri, deferred
@@ -69,7 +83,8 @@ let create (config : Config.t) =
 let wrap_in_current_access_token t request =
   let rec loop ~num_failures =
     match%bind
-      Cohttp_request_async.request
+      Cohttp_request_async_client.request
+        t.cohttp_request_async_client
         (request ~access_token:t.current_access_token.access_token)
     with
     | Ok result -> return (Ok result)
@@ -79,7 +94,7 @@ let wrap_in_current_access_token t request =
       match response_code with
       | 429 -> (* Too many requests *)
         let rate_limit_sec = 10 in
-        printf "Waiting %d sec...\n" rate_limit_sec;
+        if t.config.debug then printf "Waiting %d sec...\n" rate_limit_sec;
         let%bind () = after (Time.Span.of_int_sec rate_limit_sec) in
         loop ~num_failures:(num_failures + 1)
       | 401 -> (* Unauthorized *)
@@ -99,7 +114,7 @@ let wrap_in_current_access_token t request =
             Spotify.Authorization_code_flow.refresh_access_token
               ~credentials:t.config.credentials
               t.current_access_token.refresh_token
-            |> Cohttp_request_async.request
+            |> Cohttp_request_async_client.request t.cohttp_request_async_client
             |> ignore_response_code
           in
           let when_to_refresh =

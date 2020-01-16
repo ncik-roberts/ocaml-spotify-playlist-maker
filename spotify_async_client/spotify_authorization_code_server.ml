@@ -1,11 +1,7 @@
 open! Core
 open! Async
 
-let listen_for_authorization_code
-    ~client_id
-    ~port
-    ~scopes
-  =
+let listen_for_authorization_code ~client_id ~port ~scopes =
   let redirect_uri = sprintf "http://localhost:%d" port |> Uri.of_string in
   let client_uri, `Secret_state secret_state =
     Spotify.Authorization_code_flow.generate_client_uri_for_authorization_code
@@ -50,3 +46,4 @@ let listen_for_authorization_code
     return result
   in
   client_uri, deferred
+;;

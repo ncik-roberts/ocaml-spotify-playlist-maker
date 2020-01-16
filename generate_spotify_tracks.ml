@@ -7,10 +7,9 @@ let cleanup1 str =
   |> String.split ~on:' '
   |> List.filter ~f:(Fn.non String.is_empty)
   |> String.concat ~sep:" "
+;;
 
-let cleanup2 str =
-  str
-  |> String.filter ~f:(fun c -> Char.is_alphanum c || c = ' ')
+let cleanup2 str = str |> String.filter ~f:(fun c -> Char.is_alphanum c || c = ' ')
 
 let queries { Npr.Song.album; title; artist; start_time = _ } =
   let open List.Let_syntax in
@@ -28,8 +27,7 @@ let queries { Npr.Song.album; title; artist; start_time = _ } =
   let title_artists =
     let%bind title = all title in
     let%bind artist = all artist in
-    Spotify.Query.create ~album:None ~track:(Some title) ~artist:(Some artist)
-    |> return
+    Spotify.Query.create ~album:None ~track:(Some title) ~artist:(Some artist) |> return
   in
   let title_albums =
     match album with
@@ -37,32 +35,33 @@ let queries { Npr.Song.album; title; artist; start_time = _ } =
     | Some album ->
       let%bind title = all title in
       let%bind album = all album in
-      Spotify.Query.create ~album:(Some album) ~track:(Some title) ~artist:None
-      |> return
+      Spotify.Query.create ~album:(Some album) ~track:(Some title) ~artist:None |> return
   in
   List.dedup_and_sort
     ~compare:Spotify.Query.compare
     (title_artist_albums @ title_artists @ title_albums)
+;;
 
 let tracks
     (songs : Npr.Song.t Or_error.t Pipe.Reader.t)
     ~(client : Spotify_async_client.t)
   =
   Pipe.create_reader ~close_on_exception:true (fun writer ->
-    Pipe.iter songs ~f:(fun song_or_error ->
-      match song_or_error with
-      | Error e ->
-        error_s [%message "NPR pipe returned with error" (e : Error.t)]
-        |> Pipe.write writer
-      | Ok song ->
-        let rec loop = function
-          | [] -> Ok (`Skipping song) |> Pipe.write writer
-          | query :: queries ->
-            (match%bind Spotify_async_client.search_track client ~query with
-             | Ok (Some track) -> Pipe.write writer (Ok (`Found (song, track)))
-             | Ok None -> loop queries
-             | Error e ->
-               error_s [%message "Spotify client returned with error" (e : Error.t)]
-               |> Pipe.write writer)
-        in
-        loop (queries song)))
+      Pipe.iter songs ~f:(fun song_or_error ->
+          match song_or_error with
+          | Error e ->
+            error_s [%message "NPR pipe returned with error" (e : Error.t)]
+            |> Pipe.write writer
+          | Ok song ->
+            let rec loop = function
+              | [] -> Ok (`Skipping song) |> Pipe.write writer
+              | query :: queries ->
+                (match%bind Spotify_async_client.search_track client ~query with
+                | Ok (Some track) -> Pipe.write writer (Ok (`Found (song, track)))
+                | Ok None -> loop queries
+                | Error e ->
+                  error_s [%message "Spotify client returned with error" (e : Error.t)]
+                  |> Pipe.write writer)
+            in
+            loop (queries song)))
+;;

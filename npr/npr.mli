@@ -5,12 +5,12 @@ type t
 
 module Song : sig
   type t =
-   { title : string
-   ; artist : string
-   ; album : string option
-   ; start_time : Time_ns.t
-   }
-   [@@deriving sexp_of]
+    { title : string
+    ; artist : string
+    ; album : string option
+    ; start_time : Time_ns.t
+    }
+  [@@deriving sexp_of]
 end
 
 val create : debug_mode:bool -> station_id:string -> t

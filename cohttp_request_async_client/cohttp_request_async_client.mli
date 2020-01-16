@@ -18,5 +18,4 @@ end
 type t
 
 val create : debug_mode:Debug_mode.t option -> t
-
 val request : t -> 'a Cohttp_request.t -> ('a, Request_error.t) Result.t Deferred.t

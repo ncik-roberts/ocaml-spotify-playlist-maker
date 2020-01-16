@@ -2,7 +2,6 @@ module Credentials : sig
   type t
 
   val create : client_id:string -> client_secret:string -> t
-
   val client_id : t -> string
 end
 
@@ -87,11 +86,7 @@ end
 module Query : sig
   type t [@@deriving compare]
 
-  val create
-    :  album:string option
-    -> artist:string option
-    -> track:string option
-    -> t
+  val create : album:string option -> artist:string option -> track:string option -> t
 end
 
 module Track : sig
@@ -103,6 +98,7 @@ end
 
 module Playlist : sig
   type t
+
   val parse : [ `Uri of string | `Id of string ] -> (t, [ `Invalid_playlist ]) result
 end
 

@@ -32,6 +32,7 @@ module Body = struct
     | Json_encoded { body; body_to_yojson = (module Body) } ->
       let yojson = Body.to_yojson body in
       [%message "Json_encoded" ~body:(Yojson.Safe.to_string yojson : string)]
+  ;;
 end
 
 module Request_type = struct
@@ -51,10 +52,13 @@ module Request = struct
 
   let map (type a b) ~(f : a -> b) (t : a t) : b t =
     let module From = (val t.response_of_yojson) in
-    { t with response_of_yojson =
+    { t with
+      response_of_yojson =
         (module struct
-           type t = b
-           let of_yojson yojson = Result.map ~f (From.of_yojson yojson)
-         end)
+          type t = b
+
+          let of_yojson yojson = Result.map ~f (From.of_yojson yojson)
+        end)
     }
+  ;;
 end

@@ -222,7 +222,7 @@ module Playlist = struct
   let parse = function
     | `Id id -> Ok { id }
     | `Uri uri ->
-      (try Scanf.sscanf uri "spotify:track:%s" (fun id -> Ok { id }) with
+      (try Scanf.sscanf uri "spotify:playlist:%s" (fun id -> Ok { id }) with
       | _ -> Error `Invalid_playlist)
   ;;
 end

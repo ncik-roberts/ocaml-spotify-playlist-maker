@@ -13,7 +13,7 @@ let within_the_last time ~span =
 let prompt_in_web_browser_for_authorization uri =
   match%map Process.run ~prog:"xdg-open" ~args:[ Uri.to_string uri ] () with
   | Error _ as error -> error
-  | Ok (_output : string) -> (Ok ())
+  | Ok (_output : string) -> Ok ()
 ;;
 
 let generate_playlist_name ~begin_ ~end_ ~begin_time ~end_time =
@@ -86,8 +86,7 @@ let command =
         "--station-id"
         (optional_with_default "50e451b6a93e91ee0a00028e" string)
         ~doc:" station id to query"
-    and client_creator = Spotify_async_client.Param.param
-    in
+    and client_creator = Spotify_async_client.Param.param in
     fun () ->
       let open Deferred.Let_syntax in
       let zone = force Time_ns.Zone.local in

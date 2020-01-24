@@ -5,7 +5,7 @@ module Credentials = struct
     { client_id : string
     ; client_secret : string
     }
-  [@@deriving fields]
+  [@@deriving yojson, fields]
 
   let create = Fields.create
 end
@@ -35,6 +35,7 @@ module Scope = struct
     | `User_read_recently_played
     | `User_top_read
     ]
+  [@@deriving yojson]
 
   let to_uri = function
     | `App_remote_control -> "app-remote-control"

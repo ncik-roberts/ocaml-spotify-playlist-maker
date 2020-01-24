@@ -10,16 +10,26 @@ module Config : sig
        *  to listen for the client authorization flow token.
        *)
     ; credentials : Spotify.Credentials.t
-    ; scopes : Spotify.Scope.t list
     ; user_id : string
     ; debug : bool
     }
 end
 
+module Param : sig
+  val param : (scopes:Spotify.Scope.t list -> Uri.t * t Deferred.t) Command.Param.t
+  val from_config_file : t Deferred.t Command.Param.t
+  val from_config_file_refreshing_refresh_token : (scopes:Spotify.Scope.t list -> Uri.t * t Deferred.t) Command.Param.t
+end
+
 (* A human must visit the returned URI to authorize the Spotify app.
  * Only then will the returned deferred become determined.
  *)
-val create : Config.t -> Uri.t * t Or_error.t Deferred.t
+val create : ?write_config_to:Filename.t -> Config.t -> scopes : Spotify.Scope.t list -> Uri.t * t Or_error.t Deferred.t
+
+val config : t -> Config.t
+
+val create_with_refresh_token :
+  Config.t -> Spotify.Authorization_code_flow.Refresh_token.t -> t Or_error.t Deferred.t
 
 val make_playlist
   :  t

@@ -1,5 +1,5 @@
 module Credentials : sig
-  type t
+  type t [@@deriving yojson]
 
   val create : client_id:string -> client_secret:string -> t
   val client_id : t -> string
@@ -43,6 +43,7 @@ module Scope : sig
     | `User_read_recently_played
     | `User_top_read
     ]
+  [@@deriving yojson]
 end
 
 module Authorization_code_flow : sig
@@ -57,7 +58,7 @@ module Authorization_code_flow : sig
   end
 
   module Refresh_token : sig
-    type t
+    type t [@@deriving yojson]
   end
 
   type t =

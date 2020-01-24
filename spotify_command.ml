@@ -10,11 +10,10 @@ let within_the_last time ~span =
   Time_ns.Span.( < ) (Time_ns.diff (Time_ns.now ()) time) span
 ;;
 
-let prompt_in_web_browser_for_authorization config =
-  let client_uri, result = Spotify_async_client.create config in
-  match%bind Process.run ~prog:"xdg-open" ~args:[ Uri.to_string client_uri ] () with
-  | Error _ as error -> return error
-  | Ok (_output : string) -> result
+let prompt_in_web_browser_for_authorization uri =
+  match%map Process.run ~prog:"xdg-open" ~args:[ Uri.to_string uri ] () with
+  | Error _ as error -> error
+  | Ok (_output : string) -> (Ok ())
 ;;
 
 let generate_playlist_name ~begin_ ~end_ ~begin_time ~end_time =
@@ -35,12 +34,6 @@ let generate_playlist_name ~begin_ ~end_ ~begin_time ~end_time =
         end_time
   in
   sprintf "WYEP Playlist %s" suffix
-;;
-
-let credentials ~credentials_file =
-  match In_channel.read_lines credentials_file with
-  | [ client_id; client_secret ] -> Spotify.Credentials.create ~client_id ~client_secret
-  | _ -> failwith ("Invalid file " ^ credentials_file)
 ;;
 
 let command =
@@ -71,12 +64,6 @@ let command =
         "--end-hour"
         (optional int)
         ~doc:"24 End hour (military; incl)"
-    and user_id =
-      flag
-        ~aliases:[ "u" ]
-        "--user-id"
-        (optional_with_default "ncik_roberts" string)
-        ~doc:"ncik_roberts Spotify user id"
     and playlist_uri =
       flag
         "--playlist-uri"
@@ -99,18 +86,7 @@ let command =
         "--station-id"
         (optional_with_default "50e451b6a93e91ee0a00028e" string)
         ~doc:" station id to query"
-    and debug = flag "--debug" no_arg ~doc:" debug mode (print a lot)"
-    and port =
-      flag
-        "--port"
-        (optional_with_default 8888 int)
-        ~doc:"8888 port to use for fetching authorization code"
-    and credentials_file =
-      flag
-        ~aliases:[ "c" ]
-        "--credentials-file"
-        (optional_with_default "credentials.txt" string)
-        ~doc:"credentials.txt the credentials file"
+    and client_creator = Spotify_async_client.Param.param
     in
     fun () ->
       let open Deferred.Let_syntax in
@@ -119,21 +95,19 @@ let command =
       let begin_ = Option.value begin_ ~default:today in
       let end_ = Option.value end_ ~default:today in
       let end_time = Option.value end_time ~default:24 in
-      let npr = Npr.create ~debug_mode:debug ~station_id in
       let from = make_time ~zone begin_ begin_time in
       let until = make_time ~zone end_ end_time in
-      let credentials = credentials ~credentials_file in
       let scopes =
         match playlist_uri with
         | Some _ ->
           [ `Playlist_modify_public; `Playlist_modify_private; `Playlist_read_private ]
         | None -> [ `Playlist_modify_private ]
       in
-      let%bind client =
-        prompt_in_web_browser_for_authorization
-          { port; scopes; user_id; credentials; debug }
-        >>| ok_exn
-      in
+      let uri, client_deferred = client_creator ~scopes in
+      let%bind () = prompt_in_web_browser_for_authorization uri >>| ok_exn in
+      let%bind client = client_deferred in
+      let config = Spotify_async_client.config client in
+      let npr = Npr.create ~debug_mode:config.debug ~station_id in
       let%bind playlist, uris_already_added_to_playlist =
         match
           playlist_uri |> Option.map ~f:(fun uri -> Spotify.Playlist.parse (`Uri uri))

@@ -1,4 +1,5 @@
 credentials.txt
+config.json
 _build
 **/dune-project
 **/.merlin

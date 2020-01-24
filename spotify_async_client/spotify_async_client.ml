@@ -8,10 +8,18 @@ module Config = struct
        *  to listen for the client authorization flow token.
        *)
     ; credentials : Spotify.Credentials.t
-    ; scopes : Spotify.Scope.t list
     ; user_id : string
     ; debug : bool
     }
+    [@@deriving yojson]
+end
+
+module Config_with_refresh_token = struct
+  type t =
+    { config : Config.t
+    ; refresh_token : Spotify.Authorization_code_flow.Refresh_token.t
+    }
+  [@@deriving yojson { exn = true }]
 end
 
 module Current_access_token = struct
@@ -27,6 +35,8 @@ type t =
   ; cohttp_request_async_client : Cohttp_request_async_client.t
   ; mutable current_access_token : Current_access_token.t
   }
+  [@@deriving fields]
+
 
 let ignore_response_code
     (deferred : ('a, Cohttp_request_async_client.Request_error.t) Result.t Deferred.t)
@@ -37,24 +47,35 @@ let ignore_response_code
   | Error { response_code = _; error } -> Error error
 ;;
 
-(* A human must visit the returned URI to authorize the Spotify app.
- * Only then will the returned deferred become determined.
- *)
-let create (config : Config.t) =
-  let open Deferred.Or_error.Let_syntax in
+let create_client (config : Config.t) =
   let debug_mode : Cohttp_request_async_client.Debug_mode.t option =
     if config.debug then Some { print_requests = true; print_responses = true } else None
   in
-  let cohttp_request_async_client = Cohttp_request_async_client.create ~debug_mode in
+  Cohttp_request_async_client.create ~debug_mode
+
+let current_access_token
+    { Spotify.Authorization_code_flow.access_token; refresh_token; expires_in }
+  =
+  let when_to_refresh =
+    Time_ns.add (Time_ns.now ()) (Time_ns.Span.of_int_sec expires_in)
+  in
+  { Current_access_token.access_token; refresh_token; when_to_refresh }
+
+(* A human must visit the returned URI to authorize the Spotify app.
+ * Only then will the returned deferred become determined.
+ *)
+let create ?write_config_to (config : Config.t) ~scopes =
+  let open Deferred.Or_error.Let_syntax in
+  let cohttp_request_async_client = create_client config in
   let uri, authorization_code_deferred =
     Spotify_authorization_code_server.listen_for_authorization_code
       ~client_id:(Spotify.Credentials.client_id config.credentials)
       ~port:config.port
-      ~scopes:config.scopes
+      ~scopes
   in
   let deferred =
     let%bind authorization_code = authorization_code_deferred in
-    let%bind { Spotify.Authorization_code_flow.access_token; refresh_token; expires_in } =
+    let%bind access_token =
       Cohttp_request_async_client.request
         cohttp_request_async_client
         (Spotify.Authorization_code_flow.get_access_token
@@ -62,17 +83,34 @@ let create (config : Config.t) =
            ~credentials:config.credentials)
       |> ignore_response_code
     in
-    let when_to_refresh =
-      Time_ns.add (Time_ns.now ()) (Time_ns.Span.of_int_sec expires_in)
-    in
+    Option.iter write_config_to ~f:(fun file ->
+      Config_with_refresh_token.to_yojson { config; refresh_token = access_token.refresh_token }
+      |> Yojson.Safe.to_file file);
     { config
     ; cohttp_request_async_client
-    ; current_access_token = { access_token; refresh_token; when_to_refresh }
+    ; current_access_token = current_access_token access_token
     }
     |> return
   in
   uri, deferred
 ;;
+
+let create_with_refresh_token (config : Config.t) refresh_token =
+  let open Deferred.Or_error.Let_syntax in
+  let cohttp_request_async_client = create_client config in
+  let%bind access_token =
+    Cohttp_request_async_client.request
+      cohttp_request_async_client
+      (Spotify.Authorization_code_flow.refresh_access_token
+         refresh_token
+         ~credentials:config.credentials)
+    |> ignore_response_code
+  in
+  { config
+  ; cohttp_request_async_client
+  ; current_access_token = current_access_token access_token
+  }
+  |> return
 
 let wrap_in_current_access_token t request =
   let rec loop ~num_failures =
@@ -165,3 +203,69 @@ let search_track t ~query =
   | [] -> return None
   | track :: _ -> return (Some track)
 ;;
+
+module Param = struct
+
+let credentials ~credentials_file =
+  match In_channel.read_lines credentials_file with
+  | [ client_id; client_secret ] -> Spotify.Credentials.create ~client_id ~client_secret
+  | _ -> failwith ("Invalid file " ^ credentials_file)
+;;
+
+  let config_param =
+    let%map_open.Command.Let_syntax () = return ()
+    and port =
+      flag
+        "--port"
+        (optional_with_default 8888 int)
+        ~doc:"8888 port to use for fetching authorization code"
+    and credentials_file =
+      flag
+        "--credentials-file"
+        (optional_with_default "credentials.txt" string)
+        ~doc:"credentials.txt the credentials file (first line is client ID, second line is client secret)"
+    and user_id =
+      flag
+        "--user-id"
+        (optional_with_default "ncik_roberts" string)
+        ~doc:"ncik_roberts Spotify user id"
+    and debug = flag "--debug" no_arg ~doc:" debug mode (print a lot)"
+    in
+    { Config.port; credentials = credentials ~credentials_file; user_id; debug }
+
+  let config_of_config_file_param =
+    let%map_open.Command.Let_syntax () = return ()
+    and config_file = anon Command.Anons.("FILE" %: string)
+    in
+    Yojson.Safe.from_file config_file
+    |> Config_with_refresh_token.of_yojson_exn
+
+  let param_of_config_param config_param =
+    let%map_open.Command.Let_syntax () = return ()
+    and config = config_param
+    and write_config_to =
+      flag
+        "--write-config-to"
+        (optional string)
+        ~doc:"FILE if present, write the configured options to this config file"
+    in
+    fun ~scopes ->
+      let uri, deferred = create ?write_config_to config ~scopes in
+      uri, deferred >>| ok_exn
+
+  let param = param_of_config_param config_param
+
+  let from_config_file =
+    let%map_open.Command.Let_syntax () = return ()
+    and config = config_of_config_file_param
+    in
+    create_with_refresh_token config.config config.refresh_token >>| ok_exn
+
+  let from_config_file_refreshing_refresh_token =
+    param_of_config_param (
+      let%map_open.Command.Let_syntax () = return ()
+      and config = config_of_config_file_param
+      in
+      config.config)
+
+end

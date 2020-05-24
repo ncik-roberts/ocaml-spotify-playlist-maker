@@ -21,7 +21,9 @@ let listen_for_authorization_code ~client_id ~port ~scopes =
             let open Option.Let_syntax in
             let get = Uri.get_query_param request_uri in
             let%bind state_query_param = get "state" in
-            let%bind () = if state_query_param = secret_state then Some () else None in
+            let%bind () =
+              if String.equal state_query_param secret_state then Some () else None
+            in
             let code = get "code" in
             let error = get "error" in
             return (code, error)

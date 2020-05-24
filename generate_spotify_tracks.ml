@@ -9,7 +9,9 @@ let cleanup1 str =
   |> String.concat ~sep:" "
 ;;
 
-let cleanup2 str = str |> String.filter ~f:(fun c -> Char.is_alphanum c || c = ' ')
+let cleanup2 str =
+  str |> String.filter ~f:(fun c -> Char.is_alphanum c || Char.equal c ' ')
+;;
 
 let queries { Npr.Song.album; title; artist; start_time = _ } =
   let open List.Let_syntax in

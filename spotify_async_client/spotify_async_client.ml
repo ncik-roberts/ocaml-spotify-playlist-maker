@@ -215,7 +215,7 @@ module Param = struct
   ;;
 
   let config_param =
-    let%map_open.Command.Let_syntax () = return ()
+    let%map_open.Command () = return ()
     and port =
       flag
         "--port"
@@ -238,13 +238,13 @@ module Param = struct
   ;;
 
   let config_of_config_file_param =
-    let%map_open.Command.Let_syntax () = return ()
+    let%map_open.Command () = return ()
     and config_file = anon Command.Anons.("FILE" %: string) in
     Yojson.Safe.from_file config_file |> Config_with_refresh_token.of_yojson_exn
   ;;
 
   let param_of_config_param config_param =
-    let%map_open.Command.Let_syntax () = return ()
+    let%map_open.Command () = return ()
     and config = config_param
     and write_config_to =
       flag
@@ -260,14 +260,14 @@ module Param = struct
   let param = param_of_config_param config_param
 
   let from_config_file =
-    let%map_open.Command.Let_syntax () = return ()
+    let%map_open.Command () = return ()
     and config = config_of_config_file_param in
     create_with_refresh_token config.config config.refresh_token >>| ok_exn
   ;;
 
   let from_config_file_refreshing_refresh_token =
     param_of_config_param
-      (let%map_open.Command.Let_syntax () = return ()
+      (let%map_open.Command () = return ()
        and config = config_of_config_file_param in
        config.config)
   ;;

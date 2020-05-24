@@ -23,6 +23,8 @@ module Song = struct
   end
 
   module Internal = struct
+    open Poly
+
     type t =
       { id : string
       ; trackName : string

@@ -187,7 +187,7 @@ module Query = struct
   let create ~album ~artist ~track =
     [ "album", album; "artist", artist; "track", track ]
     |> List.filter_map ~f:(fun (tag, value) ->
-           let%map.Option.Let_syntax value = value in
+           let%map.Option value = value in
            sprintf "%s:%s" tag value)
     |> String.concat ~sep:" "
   ;;
